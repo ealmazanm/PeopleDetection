@@ -14,8 +14,11 @@ using namespace cv;
 using namespace xn;
 
 
-const int WIDHT_BIN = 80;
-const int HEIGHT_BIN = 60;
+const int WIDHT_BIN = 40;
+const int HEIGHT_BIN = 20;
+
+const int BIG_AXIS = 40;
+const int SMALL_AXIS = 15;
 
 
 class Clustering

@@ -19,9 +19,9 @@ void getEllipseParam(const Mat* covMat, Size& axesSize, double& angle)
 
 	//SVD of covMat
 	SVD svd(*covMat);
-	double fA = svd.w.at<double>(0);
-	double sA = svd.w.at<double>(1);
-	axesSize = Size(40, 15);
+//	double fA = svd.w.at<double>(0);
+//	double sA = svd.w.at<double>(1);
+//	axesSize = Size(40, 15);
 	angle =  acosf(svd.u.col(1).dot(xBasis))*180/CV_PI;
 //	if (svd.u.at<double>(1,0) < 0.0) // dot product always return the minimum angle between the two vectors. When the y coord.< 0 then 
 // 		angle = -angle;
@@ -148,10 +148,9 @@ bool isBiggestNeigh(int val, int row, int col, const Mat* img)
 list<Point> Clustering::clusterImage(Mat& img)
 {
 	list<Point> clusters;
-	assert(img.cols == 1280);
-	assert(img.rows == 480);
 	assert(img.channels() == 3);
 	assert(img.type() == CV_8UC3);
+
 	int nRows = img.rows/HEIGHT_BIN;
 	int nCols = img.cols/WIDHT_BIN;
 	Mat clusterImg = Mat::zeros(nRows ,nCols, CV_32F); //matrix to store the number of points in each bin
@@ -184,11 +183,10 @@ list<Point> Clustering::clusterImage(Mat& img)
 			}
 		}
 	}
-	double sigmaX, sigmaY, meanX, meanY;
-	double angle = 0.0;
+	double meanX, meanY, angle;
+	angle = meanX = meanY = 0.0;
 	Size axesSize;
 	Mat covMat(2,2, CV_64F);
-	sigmaX = sigmaY = meanX = meanY = 0.0;
 	//Non maximum supresion
 	for (int i = 0; i < clusterImg.rows; i++)
 	{
@@ -199,31 +197,20 @@ list<Point> Clustering::clusterImage(Mat& img)
 			int col = j*WIDHT_BIN;
 			int row = i*HEIGHT_BIN;
 			int num = ptr[j];
-			if (num > 300 && isBiggestNeigh(num, i, j, &clusterImg))
+			if (num > 100 && isBiggestNeigh(num, i, j, &clusterImg))
 			{
-				getDistribution(i, j, &clusterImg, meanX, meanY, sigmaX, sigmaY);
 				getCovarianceMatx(i, j, &clusterImg, covMat, meanX, meanY);
-
-				cout << "Cov Matrix (after)" << endl;
-				cout << covMat.at<double>(0,0) << ", " << covMat.at<double>(0,1) << endl;
-				cout << covMat.at<double>(1,0) << ", " << covMat.at<double>(1,1) << endl;
-
 				getEllipseParam(&covMat, axesSize, angle);
+				//axesSize = Size(img.rows/15, img.cols/45);
+				axesSize = Size(BIG_AXIS, SMALL_AXIS);
 				meanX *= WIDHT_BIN;
 				meanY *= HEIGHT_BIN;
 				ellipse(tmp, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), axesSize, angle, 0.0, 360, Scalar::all(0), 2);
 				ellipse(img, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), axesSize, angle, 0.0, 360, Scalar::all(0), 2);
-				circle(tmp, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), 15, Scalar::all(0), 2);
- 				circle(img, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), 15, Scalar::all(0), 2);
-
-//				ellipse(tmp, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), Size(sigmaX/4, sigmaY/4), 0.0, 0.0, 360, Scalar::all(0), 2);
-//				ellipse(img, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), Size(sigmaX/4, sigmaY/4), 0.0, 0.0, 360, Scalar::all(0), 2);
-//				circle(tmp, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), 25, Scalar::all(0), 2);
-// 				circle(img, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), 25, Scalar::all(0), 2);
+				circle(tmp, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), SMALL_AXIS, Scalar::all(0), 2);
+ 				circle(img, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), SMALL_AXIS, Scalar::all(0), 2);
 				clusters.push_back(Point(col+(WIDHT_BIN/2),row + (HEIGHT_BIN/2)));
 			}
-//			outDebug << "(" << i <<", "<<j<<"): " << num << endl;
-			
 			if (num > 0)
 			{
 				char txt[15];
@@ -238,7 +225,7 @@ list<Point> Clustering::clusterImage(Mat& img)
 	
 	cv::imshow("Original", img);
 	cv::imshow("Clustering", tmp);
-	cv::waitKey(500);
+	cv::waitKey(50);
 	return clusters;
 
 }
