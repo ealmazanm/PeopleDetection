@@ -14,7 +14,7 @@ Clustering::~Clustering(void)
 void getEllipseParam(const Mat* covMat, Size& axesSize, double& angle)
 {
 	//x
-	double xVals[2] = {1, 0};
+	double xVals[2] = {-1, 0};
 	Mat xBasis (2,1, CV_64F, xVals);
 
 	//SVD of covMat
@@ -22,10 +22,9 @@ void getEllipseParam(const Mat* covMat, Size& axesSize, double& angle)
 	double fA = svd.w.at<double>(0);
 	double sA = svd.w.at<double>(1);
 	axesSize = Size(40, 15);
-	if (fA < sA)
-		angle =  acosf(svd.u.col(0).dot(xBasis))*180/CV_PI;
-	else
-		angle =  acosf(svd.u.col(1).dot(xBasis))*180/CV_PI;
+	angle =  acosf(svd.u.col(1).dot(xBasis))*180/CV_PI;
+//	if (svd.u.at<double>(1,0) < 0.0) // dot product always return the minimum angle between the two vectors. When the y coord.< 0 then 
+// 		angle = -angle;
 }
 
 
