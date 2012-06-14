@@ -12,7 +12,7 @@ int main()
 	{
 		Mat frame;
 		capture.retrieve(frame);
-		cluster.clusterImage(frame);
+//		cluster.clusterImage(frame);
 	}
 	capture.release();
 

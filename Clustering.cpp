@@ -145,7 +145,46 @@ bool isBiggestNeigh(int val, int row, int col, const Mat* img)
 }
 
 
-list<Point> Clustering::clusterImage(Mat& img)
+XnRGB24Pixel Clustering::get_ColorHeight_Person(const Mat* colorMap, const Mat* heightMap, float& height, int row, int col)
+{
+	XnRGB24Pixel color;
+	int initY = max((row-1)*HEIGHT_BIN, 0);
+	int initX = max((col-1)*WIDHT_BIN, 0);
+	int endY = min((row+2)*HEIGHT_BIN, colorMap->rows);
+	int endX = min((col+2)*WIDHT_BIN, colorMap->cols);
+
+	int cBlue, cGreen, cRed;
+	cBlue = cGreen = cRed = 0;
+
+	int pointCont = 0;
+	for (int y = initY; y < endY; y++)
+	{
+		const uchar* ptr = colorMap->ptr<uchar>(y);
+		const float* ptrH = heightMap->ptr<float>(y);
+		for (int x = initX; x < endX; x++)
+		{
+			if (ptr[3*x] != 255 && ptr[3*x+1]!=255 && ptr[3*x+2]!=255)
+			{
+				pointCont++;
+				cBlue += ptr[3*x];
+				cGreen += ptr[3*x+1];
+				cRed += ptr[3*x+2];
+
+				height += ptrH[x];
+			}
+		}
+	}
+			
+	color.nBlue = cBlue/pointCont;
+	color.nGreen = cGreen/pointCont;
+	color.nRed = cRed/pointCont;
+	height /= pointCont;
+	return color;
+}
+
+
+
+list<Point> Clustering::clusterImage(Mat& img, const Mat* colorMap, const Mat* heightMap)
 {
 	list<Point> clusters;
 	assert(img.channels() == 3);
@@ -171,7 +210,7 @@ list<Point> Clustering::clusterImage(Mat& img)
 			int col = j*3;
 
 			//look for red spots in the image
-			if (imgPtr[col] <200 && imgPtr[col+1] < 200  && imgPtr[col+2] > 150)
+			if (imgPtr[col]  == 0 && imgPtr[col+1] == 0  && imgPtr[col+2] == 255)
 			{
 ////				outDebug << (int)imgPtr[j] << ", " << (int)imgPtr[j+1] << ", " << (int)imgPtr[j+2] << endl;
 //
@@ -187,6 +226,8 @@ list<Point> Clustering::clusterImage(Mat& img)
 	angle = meanX = meanY = 0.0;
 	Size axesSize;
 	Mat covMat(2,2, CV_64F);
+	float height = -5000;
+	char heightStr[50];
 	//Non maximum supresion
 	for (int i = 0; i < clusterImg.rows; i++)
 	{
@@ -205,27 +246,31 @@ list<Point> Clustering::clusterImage(Mat& img)
 				axesSize = Size(BIG_AXIS, SMALL_AXIS);
 				meanX *= WIDHT_BIN;
 				meanY *= HEIGHT_BIN;
-				ellipse(tmp, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), axesSize, angle, 0.0, 360, Scalar::all(0), 2);
-				ellipse(img, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), axesSize, angle, 0.0, 360, Scalar::all(0), 2);
-				circle(tmp, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), SMALL_AXIS, Scalar::all(0), 2);
- 				circle(img, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), SMALL_AXIS, Scalar::all(0), 2);
+				
+				XnRGB24Pixel c = get_ColorHeight_Person(colorMap, heightMap, height, i, j);
+				itoa(height, heightStr, 10);
+				ellipse(tmp, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), axesSize, angle, 0.0, 360, Scalar(c.nBlue, c.nGreen, c.nRed), -1);
+				ellipse(img, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), axesSize, angle, 0.0, 360, Scalar(c.nBlue, c.nGreen, c.nRed), -1);
+				circle(tmp, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), SMALL_AXIS, Scalar::all(0), -1);
+ 				circle(img, Point(int(meanX)+(WIDHT_BIN/2), int(meanY) + (HEIGHT_BIN/2)), SMALL_AXIS, Scalar::all(0), -1);
+				putText(img, heightStr, Point(int(meanX)-(BIG_AXIS+10), int(meanY) - (SMALL_AXIS+10)),FONT_HERSHEY_PLAIN, 0.8, Scalar(0, 0, 0));
 				clusters.push_back(Point(col+(WIDHT_BIN/2),row + (HEIGHT_BIN/2)));
 			}
-			if (num > 0)
-			{
-				char txt[15];
-				itoa(num, txt, 10);
-				putText(tmp, txt, Point(col+(WIDHT_BIN/2.5),row + (HEIGHT_BIN/2)),FONT_HERSHEY_PLAIN, 0.8, Scalar::all(0));
-				//circle(img, Point(col, row), 3, Scalar::all(0), 3);
-			}
-			else
-				putText(tmp, "0", Point(col+(WIDHT_BIN/2.5),row + (HEIGHT_BIN/2)),FONT_HERSHEY_PLAIN, 0.8, Scalar::all(0));
+			//if (num > 0)
+			//{
+			//	char txt[15];
+			//	itoa(num, txt, 10);
+			//	putText(tmp, txt, Point(col+(WIDHT_BIN/2.5),row + (HEIGHT_BIN/2)),FONT_HERSHEY_PLAIN, 0.8, Scalar::all(0));
+			//	//circle(img, Point(col, row), 3, Scalar::all(0), 3);
+			//}
+			//else
+			//	putText(tmp, "0", Point(col+(WIDHT_BIN/2.5),row + (HEIGHT_BIN/2)),FONT_HERSHEY_PLAIN, 0.8, Scalar::all(0));
 		}
 	}
 	
-	cv::imshow("Original", img);
-	cv::imshow("Clustering", tmp);
-	cv::waitKey(50);
+//	cv::imshow("Original", img);
+//	cv::imshow("Clustering", tmp);
+//	cv::waitKey(50);
 	return clusters;
 
 }
