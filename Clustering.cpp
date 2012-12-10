@@ -1,11 +1,11 @@
 #include "Clustering.h"
 
-ofstream outDebug("D:\\debug.txt", ios::out);
+ofstream outDebug_pd("D:\\debug.txt", ios::out);
 Mat tmp;
 Clustering::Clustering(void)
 {
 	term = TermCriteria(TermCriteria::MAX_ITER+TermCriteria::EPS, 50, 0.1);
-	init = false;
+	axesSize = Size(BIG_AXIS, SMALL_AXIS);
 
 }
 
@@ -16,7 +16,7 @@ Clustering::~Clustering(void)
 }
 
 
-void getEllipseParam(const Mat* covMat, Size& axesSize, double& angle)
+void getEllipseParam(const Mat* covMat, double& angle)
 {
 	//x
 	double xVals[2] = {-1, 0};
@@ -24,16 +24,10 @@ void getEllipseParam(const Mat* covMat, Size& axesSize, double& angle)
 
 	//SVD of covMat
 	SVD svd(*covMat);
-//	double fA = svd.w.at<double>(0);
-//	double sA = svd.w.at<double>(1);
-//	axesSize = Size(40, 15);
 	angle =  acosf(svd.u.col(1).dot(xBasis))*180/CV_PI;
-//	if (svd.u.at<double>(1,0) < 0.0) // dot product always return the minimum angle between the two vectors. When the y coord.< 0 then 
-// 		angle = -angle;
 }
 
-
-void getCovarianceMatx(const int row, const int col, const Mat* cluster, Mat& covMat, Point& mean)
+void getCovarianceMatx(const int row, const int col, const Mat* cluster, Mat& covMat, double& meanX, double& meanY)
 {
 	int maxRow = cluster->rows;
 	int maxCols = cluster->cols;
@@ -54,7 +48,7 @@ void getCovarianceMatx(const int row, const int col, const Mat* cluster, Mat& co
 					int val = ptr[cCol];
 					int r = cRow*val;
 					int c = cCol*val;
-					
+
 					sumW += val;
 					sumR += r;
 					sumC += c;
@@ -68,6 +62,59 @@ void getCovarianceMatx(const int row, const int col, const Mat* cluster, Mat& co
 		cRow++;
 	}
 
+	meanX = sumC/sumW;
+	meanY = sumR/sumW;
+	double covRC = (sumRC/sumW)-(meanX*meanY);
+	covMat.at<double>(0,0) = (sumRR/sumW)-powf(meanY,2);
+	covMat.at<double>(0,1) = covRC;
+	covMat.at<double>(1,0) = covRC;
+	covMat.at<double>(1,1) = (sumCC/sumW)-powf(meanX,2);
+
+//	double vals[2][2] = {{(sumRR/sumW)-powf(meanY,2), covRC},{covRC, (sumCC/sumW)-powf(meanX,2)}};
+//	covMat =  Mat(2, 2, CV_64F, vals);
+
+}
+
+/*
+row, col (IN): bin position of a maxima
+cluster (IN): 2D histogram of foreground points
+covMat (OUT): covariance matrix
+mean (OUT): centroid of the distribution
+*/
+void getCovarianceMatx(const int row, const int col, const Mat* cluster, Mat& covMat, Point2d& mean)
+{
+	int maxRow = cluster->rows;
+	int maxCols = cluster->cols;
+	double sumR, sumC, sumRR, sumCC, sumRC, sumW;
+	sumRR = sumCC = sumR = sumC = sumW = sumRC = 0.0;
+
+	int cRow = row -1;
+	while (cRow <= row+1)
+	{
+		int cCol = col -1;
+		if (cRow >=0 && cRow < maxRow)
+		{
+			const ushort* ptr = cluster->ptr<ushort>(cRow);
+			while (cCol <= col+1)
+			{
+				if (cCol >= 0 && cCol < maxCols)
+				{
+					int val = (int)ptr[cCol];
+					int r = cRow*val;
+					int c = cCol*val;
+					
+					sumW += val;
+					sumR += r;
+					sumC += c;
+					sumRR += r*cRow;
+					sumCC += c*cCol;
+					sumRC += val*cRow*cCol;
+				}
+				cCol++;
+			}
+		}
+		cRow++;
+	}
 	mean.x = sumC/sumW;
 	mean.y = sumR/sumW;
 	double covRC = (sumRC/sumW)-(mean.x*mean.y);
@@ -133,7 +180,7 @@ bool isBiggestNeigh(int val, int row, int col, const Mat* img)
 		int cCol = col -1;
 		if (cRow >=0 && cRow < maxRow)
 		{
-			const float* ptr = img->ptr<float>(cRow);
+			const ushort* ptr = img->ptr<ushort>(cRow);
 			while (bigger && cCol <= col+1)
 			{
 				if (cCol >= 0 && cCol < maxCols)
@@ -225,12 +272,12 @@ void Clustering::trackPreviousPeople(Mat& clusterImg, const Mat* img)
 	list<Scalar>::iterator iterColors = peopleColor.begin();
 	list<MatND>::iterator iterHist = peopleHist.begin();
 	list<double>::iterator iterAngle = peopleAngle.begin();
-	list<Point>::iterator iterDirect = peopleDirection.begin();
+//	list<Point>::iterator iterDirect = peopleDirection.begin();
 
 	//Debug
-	list<int>::iterator iterFrames = peopleFrames.begin();
-	list<int>::iterator iterBGPixels = peopleNBGPixels.begin();
-	list<int>::iterator iterMatching = peopleMatching.begin();
+//	list<int>::iterator iterFrames = peopleFrames.begin();
+//	list<int>::iterator iterBGPixels = peopleNBGPixels.begin();
+//	list<int>::iterator iterMatching = peopleMatching.begin();
 
 	//RGB values
  	float rranges[] = { 0, 256}; 
@@ -238,7 +285,6 @@ void Clustering::trackPreviousPeople(Mat& clusterImg, const Mat* img)
 	float branges[] = { 0, 256 };
 	const float* ranges_RGB[] = {rranges, granges, branges}; 
 	int channels_RGB[] = {0, 1, 2};	
-
 	//HSV values
 	float hranges[] = { 0, 179}; 
 	float sranges[] = { 0, 255};
@@ -257,30 +303,18 @@ void Clustering::trackPreviousPeople(Mat& clusterImg, const Mat* img)
 		else
 			calcBackProject(img, 1, channels_RGB, *iterHist, probImage, ranges_RGB);
 //BEGIN DEBUG
-		int max = -1;
-		for (int j = 0; j < probImage.rows; j++)
-		{
-			uchar* ptr = probImage.ptr<uchar>(j);
-			for (int i = 0; i < probImage.cols; i++)
-			{
-				if (ptr[i] > max)
-					max = ptr[i];
-			}
-		}
-		if (cont == 1)
-			imshow("ProbImage", probImage);
+		imshow("ProbImage", probImage);
 //END DEBUG
 
 		Point meanInit = *iterMeans;
 
+		//Define the window to apply meanshift
 		int widthFinal = std::min(WIDHT_BIN/2, img->cols - meanInit.x)*2;
 		int heightFinal = std::min(HEIGHT_BIN/2, img->rows - meanInit.y)*2;
 			
 		int xInit = meanInit.x-(widthFinal/2);
 		int yInit = meanInit.y-(heightFinal/2);
-
 		
-
 		Rect wind(xInit, yInit, widthFinal, heightFinal);
 
 		rectangle(tmp, wind, Scalar::all(0), 2);
@@ -288,11 +322,10 @@ void Clustering::trackPreviousPeople(Mat& clusterImg, const Mat* img)
 		Point meanFinal(wind.x+WIDHT_BIN/2, wind.y+HEIGHT_BIN/2);
 		rectangle(tmp, wind, Scalar::all(0), 3);
 
-
-
+		//If the final possition does not contain a person is removed
 		int col = meanFinal.x/WIDHT_BIN;
 		int row = meanFinal.y/HEIGHT_BIN;
-		if (clusterImg.ptr<float>(row)[col] < 50)
+		if (clusterImg.ptr<ushort>(row)[col] < 50)
 		{
 			//Create report (time, matching factor, BG subtraction
 			//cout << "Number of frames: " << *iterFrames << endl;
@@ -302,20 +335,23 @@ void Clustering::trackPreviousPeople(Mat& clusterImg, const Mat* img)
 			//cout << "Matching current: " << probabilityMatching(&probImage, &wind) << endl;
 			//cout << endl;
 			
-			cout << "Probability Avg: " << *iterMatching/ *iterFrames << endl;
+//			cout << "Probability Avg: " << *iterMatching/ *iterFrames << endl;
 //			waitKey(0);
 			iterMeans = peopleMeans.erase(iterMeans);
 			iterColors = peopleColor.erase(iterColors);
 			iterHist = peopleHist.erase(iterHist);
 			iterAngle = peopleAngle.erase(iterAngle);
-			iterDirect = peopleDirection.erase(iterDirect);
+	//		iterDirect = peopleDirection.erase(iterDirect);
 
-			iterFrames = peopleFrames.erase(iterFrames);
-			iterBGPixels = peopleNBGPixels.erase(iterBGPixels);
-			iterMatching = peopleMatching.erase(iterMatching);
+//			iterFrames = peopleFrames.erase(iterFrames);
+//			iterBGPixels = peopleNBGPixels.erase(iterBGPixels);
+//			iterMatching = peopleMatching.erase(iterMatching);
 		}
 		else
 		{
+			//TODO: UPDATE THE MODEL
+
+			//The foreground points of the person are removed so, it is not detected as a new person
 			int xInit, yInit, w, h;
 			xInit = std::max(0,col-1);
 			yInit = std::max(0, row-1);
@@ -323,39 +359,41 @@ void Clustering::trackPreviousPeople(Mat& clusterImg, const Mat* img)
 			h = std::min(clusterImg.rows-yInit, 3);
 
 			Mat clusterRoi = clusterImg(Rect(xInit, yInit, w, h));
-			clusterRoi = clusterRoi.zeros(clusterRoi.rows, clusterRoi.cols, CV_32F);
+			clusterRoi = clusterRoi.zeros(clusterRoi.rows, clusterRoi.cols, CV_16U);
 
+			//Check the angle of the ellipse
 			Matx21d v2 (-(meanInit.y-meanFinal.y), meanInit.x-meanFinal.x);
 			*iterAngle = acosf(v1.dot(v2)/(norm(v1)*norm(v2)))*180/CV_PI;
+			//Update new position
 			*iterMeans = meanFinal;
-			*iterDirect = meanInit;
+//			*iterDirect = meanInit;
 
-			*iterFrames += 1;
-
-			int prob = probabilityMatching(&probImage, &wind);
-			cout << prob << endl;
-			*iterMatching += prob;
+//			*iterFrames += 1;
+			//Evaluation
+//			int prob = probabilityMatching(&probImage, &wind);
+//			cout << prob << endl;
+//			*iterMatching += prob;
 //			cout << *iterAngle << endl;
 
 			iterMeans++;
 			iterColors++;
 			iterHist++;
 			iterAngle++;
-			iterDirect++;
+//			iterDirect++;
 
-			iterFrames++;
-			iterBGPixels++;
-			iterMatching++;
+//			iterFrames++;
+//			iterBGPixels++;
+//			iterMatching++;
 		}
 	}
 }
 
-void Clustering::createProbabilityImage(Mat& probImage, const Mat* img, const Rect* roi, const Mat* mask, MatND& hist)
+void Clustering::createModel(const Mat* img, const Rect* roi, const Mat* mask, MatND& hist)
 {
-	//only rgb
-	Mat img_roi = (*img)(*roi); //create a roi in hsv
+	Mat img_roi = (*img)(*roi);
 	Mat mask_roi = (*mask)(*roi);	
 
+	//RGB parameters
 	int rbins = 30, gbins = 32, bbins = 32; 
 	int histSize_RGB[] = {rbins, gbins, bbins}; 
 	float rranges[] = { 0, 256}; 
@@ -363,7 +401,7 @@ void Clustering::createProbabilityImage(Mat& probImage, const Mat* img, const Re
 	float branges[] = { 0, 256 };
 	const float* ranges_RGB[] = {rranges, granges, branges}; 
 	int channels_RGB[] = {0, 1, 2};	
-
+	//HSV parameters
 	int hbins = 30, sbins = 32;
 	int histSize_HSV[] = {hbins, sbins}; 
 	float hranges[] = { 0, 179}; 
@@ -375,61 +413,53 @@ void Clustering::createProbabilityImage(Mat& probImage, const Mat* img, const Re
 	{
 		calcHist(&img_roi, 1, channels_HSV, mask_roi, hist, 2, histSize_HSV, ranges_HSV, true, false);
 		normalize(hist, hist, 0, 255, NORM_MINMAX, -1, Mat());
-		calcBackProject(img, 1, channels_HSV, hist, probImage, ranges_HSV);
+		//calcBackProject(img, 1, channels_HSV, hist, probImage, ranges_HSV);
 	}
 	else
 	{
 		calcHist(&img_roi, 1, channels_RGB, mask_roi, hist, 2, histSize_RGB, ranges_RGB, true, false);
 		normalize(hist, hist, 0, 255, NORM_MINMAX, -1, Mat());
-		calcBackProject(img, 1, channels_RGB, hist, probImage, ranges_RGB);
+		//calcBackProject(img, 1, channels_RGB, hist, probImage, ranges_RGB);
 	}
 }
 
-void Clustering::clusterImage(const Mat* colorMaps, const Mat* hsvImag)
+// Tracking (meanShift)
+void Clustering::clusterImage(Mat* imgFinal, const Mat& mask)
 {
-	Mat gray;
-	cvtColor(*colorMaps, gray, CV_RGB2GRAY);
-	Mat mask;
-	threshold( gray, mask, 128, 255,THRESH_BINARY_INV);
-	
-	Mat imgFinal;
-	if (HSV_MEANSHIFT)
-		imgFinal = *hsvImag;
-	else
-		imgFinal = *colorMaps;
 
-	Mat clusterImg = Mat::zeros(hsvImag->rows/HEIGHT_BIN ,hsvImag->cols/WIDHT_BIN, CV_32F); //matrix to store the number of points in each bin
-	tmp = Mat::ones(hsvImag->rows, hsvImag->cols, CV_32F);
+	Mat clusterImg = Mat::zeros(imgFinal->rows/HEIGHT_BIN ,imgFinal->cols/WIDHT_BIN, CV_16U); //matrix to store the number of points in each bin
+	//shows the data binning
+	tmp = Mat::ones(imgFinal->rows, imgFinal->cols, CV_32F);
 
 	//fill the bins with the number of red points in each bin
-	for (int i = 0; i < hsvImag->rows; i++)
+	for (int i = 0; i < imgFinal->rows; i++)
 	{
-		const uchar* imgPtr = hsvImag->ptr<const uchar>(i);
+		const uchar* imgPtr = imgFinal->ptr<const uchar>(i);
 		if (i%HEIGHT_BIN == 0) // debug for drawing horizontal lines
 			line(tmp, Point(0, i), Point(tmp.cols-1, i), Scalar::all(0));
 
-		for (int j = 0; j < hsvImag->cols; j++)
+		for (int j = 0; j < imgFinal->cols; j++)
 		{
 			if (j%WIDHT_BIN == 0)// debug for drawing vertical lines
 				line(tmp, Point(j,0), Point(j, tmp.rows-1), Scalar::all(0));
 
-			//look for red spots in the image
-			//if (imgPtr[j*3]  > 0 && imgPtr[j*3+1] > 0  && imgPtr[j*3+2] < 255)
-			if (imgPtr[j*3+2] < 240)
+			//look for foreground points in the image
+			if ((HSV_MEANSHIFT && imgPtr[j*3+2] < 240) || (!HSV_MEANSHIFT && (imgPtr[j*3]  > 0 && imgPtr[j*3+1] > 0  && imgPtr[j*3+2] < 255))) 
 			{
-//				//find the correct bin
+				//find the correct bin
   				int rowBin = (int)i/HEIGHT_BIN;
 				int colBin = (int)j/WIDHT_BIN;
-				clusterImg.ptr<float>(rowBin)[colBin] += 1;
+				clusterImg.ptr<ushort>(rowBin)[colBin] += 1;
 			}
 		}
 	}
+	//BEGIN - Debug cluster image
 	for (int i = 0; i < clusterImg.rows; i++)
 	{
-		float* ptr = clusterImg.ptr<float>(i);
+		ushort* ptr = clusterImg.ptr<ushort>(i);
 		for (int j = 0; j < clusterImg.cols; j++)
 		{
-			int num = ptr[j];
+			int num = (int)ptr[j];
 			int col = j*WIDHT_BIN;
 			int row = i*HEIGHT_BIN;
 			if (num > 0)
@@ -443,41 +473,53 @@ void Clustering::clusterImage(const Mat* colorMaps, const Mat* hsvImag)
 
 		}
 	}
+	//END
 
 	//check the previos people
 	if (peopleMeans.size() > 0)
-		trackPreviousPeople(clusterImg, &imgFinal);
+		trackPreviousPeople(clusterImg, imgFinal);
 
-	init = true;
+//	init = true;
+	//covariance matrix (2D distribution of foreground points)
 	Mat covMat(2,2, CV_64F);
+	//angle of the fore. distribution
 	double angle = 0.0;
-	Point meanInit;
-	Size axesSize;
+	//centroid of the fore. distribution
+	Point2d meanInit;
+	//Create random colours for people
 	srand(time(NULL));
 	Matx21d xOrt(1,0);
-	//Non maximum supresion
+	//Non maxima supresion
 	for (int i = 0; i < clusterImg.rows; i++)
 	{
-		float* ptr = clusterImg.ptr<float>(i);
+		ushort* ptr = clusterImg.ptr<ushort>(i);
 		for (int j = 0; j < clusterImg.cols; j++)
 		{
+			//x,y position of the activityMap (top left corner of the bin)
 			int col = j*WIDHT_BIN;
 			int row = i*HEIGHT_BIN;
 
-			int num = ptr[j];
-			if (num > 100 && isBiggestNeigh(num, i, j, &clusterImg))
+			int num = (int)ptr[j];
+			if (num > NON_MAXIMA_THRESHOLD && isBiggestNeigh(num, i, j, &clusterImg))
 			{
-				getCovarianceMatx(i, j, &clusterImg, covMat, meanInit);
+				getCovarianceMatx(i, j, &clusterImg, covMat, meanInit); //distribution of points
+				//Centroid in the MoA
 				meanInit.x = meanInit.x*WIDHT_BIN+(WIDHT_BIN/2);
 				meanInit.y = meanInit.y*HEIGHT_BIN+(HEIGHT_BIN/2);
-				getEllipseParam(&covMat, axesSize, angle);
-				Rect wind(meanInit.x-(WIDHT_BIN/2), meanInit.y-(HEIGHT_BIN/2), WIDHT_BIN, HEIGHT_BIN);
-				//create probability image using the rgb roi
+				getEllipseParam(&covMat, angle);
+				//Define the region to create the model.
+
+				int widthF = min((int)(imgFinal->cols-meanInit.x), WIDHT_BIN);
+				int heightF = min((int)(imgFinal->rows-meanInit.y), HEIGHT_BIN);
+
+				Rect wind(meanInit.x-widthF, meanInit.y-heightF, widthF*2, heightF*2);
+				//create probability image using the roi
 				MatND hist;
 				Mat probImage;
-				createProbabilityImage(probImage, &imgFinal, &wind, &mask, hist);
-
-				peopleDirection.push_back(meanInit);
+				createModel(imgFinal, &wind, &mask, hist);
+			
+				//Store new person (position, angle and color)
+	//			peopleDirection.push_back(meanInit);
 				peopleHist.push_back(hist);
 				peopleMeans.push_back(meanInit);
 				peopleAngle.push_back(angle);
@@ -485,26 +527,16 @@ void Clustering::clusterImage(const Mat* colorMaps, const Mat* hsvImag)
 				peopleColor.push_back(c);
 
 				//Debug
-				int prob = probabilityMatching(&probImage, &wind);
+				/*int prob = probabilityMatching(&probImage, &wind);
 				cout << "Probability (new): " << prob << endl;
 				peopleMatching.push_back(prob);
 				peopleFrames.push_back(1);
-				peopleNBGPixels.push_back(num);
+				peopleNBGPixels.push_back(num);*/
 
 
 
-				ellipse(tmp, Point(int(meanInit.x)+(WIDHT_BIN/2), int(meanInit.y) + (HEIGHT_BIN/2)), axesSize, angle, 0.0, 360, c, -1);
+				//ellipse(tmp, Point(int(meanInit.x)+(WIDHT_BIN/2), int(meanInit.y) + (HEIGHT_BIN/2)), axesSize, angle, 0.0, 360, c, -1);
 			}
-
-			//if (num > 0)
-			//{
-			//	char txt[15];
-			//	itoa(num, txt, 10);
-			//	putText(tmp, txt, Point(col+(WIDHT_BIN/2.5),row + (HEIGHT_BIN/2)),FONT_HERSHEY_PLAIN, 0.8, Scalar::all(0));
-			//}
-			//else
-			//	putText(tmp, "0", Point(col+(WIDHT_BIN/2.5),row + (HEIGHT_BIN/2)),FONT_HERSHEY_PLAIN, 0.8, Scalar::all(0));
-
 		}
 	}
 	imshow("Clusters", tmp);
@@ -515,15 +547,14 @@ void Clustering::drawPeople(Mat& img)
 	list<Point>::iterator iterMeans = peopleMeans.begin();
 	list<Scalar>::iterator iterColors = peopleColor.begin();
 	list<double>::iterator iterAngle = peopleAngle.begin();
-	list<Point>::iterator iterDirect = peopleDirection.begin();
+//	list<Point>::iterator iterDirect = peopleDirection.begin();
 
 	while (iterMeans != peopleMeans.end())
 	{
-		Size axesSize = Size(BIG_AXIS, SMALL_AXIS);
 		Point mean = *iterMeans;
 		ellipse(img, *iterMeans, axesSize, *iterAngle, 0.0, 360, *iterColors, -1);
 		circle(img, *iterMeans, SMALL_AXIS, Scalar::all(0), -1);
-		Point direct = *iterDirect;
+//		Point direct = *iterDirect;
 
 		//Point meanVectorPerp (-(mean.y-direct.y), mean.x-direct.x);
 		//Point dest (mean.x+2*meanVectorPerp.x, mean.y+2*meanVectorPerp.y);
@@ -542,6 +573,98 @@ void Clustering::drawPeople(Mat& img)
 		iterMeans++;
 		iterColors++;
 		iterAngle++;
-		iterDirect++;
+//		iterDirect++;
 	}
+}
+
+//Method recover from history (it only detects, not tracking)
+//People detection
+int Clustering::clusterImage(Mat& img, Point* centres, double* angles)
+{
+	list<Point> clusters;
+	assert(img.channels() == 3);
+	assert(img.type() == CV_8UC3);
+	int numPeople = 0;
+
+	int nRows = img.rows/HEIGHT_BIN;
+	int nCols = img.cols/WIDHT_BIN;
+	Mat clusterImg = Mat::zeros(nRows ,nCols, CV_16U); //matrix to store the number of points in each bin
+	Mat tmp = Mat::ones(img.rows, img.cols, CV_32F);
+
+	//fill the bins with the number of red points in each bin
+	for (int i = 0; i < img.rows; i++)
+	{
+		uchar* imgPtr = img.ptr<uchar>(i);
+		if (i%HEIGHT_BIN == 0) // debug for drawing horizontal lines
+			line(tmp, Point(0, i), Point(tmp.cols-1, i), Scalar::all(0));
+
+		for (int j = 0; j < img.cols; j++)
+		{
+			if (j%WIDHT_BIN == 0)// debug for drawing vertical lines
+				line(tmp, Point(j,0), Point(j, tmp.rows-1), Scalar::all(0));
+
+			int col = j*3;
+
+			//look for red spots in the image
+			if (imgPtr[col] < 250 || imgPtr[col+1] < 250 || imgPtr[col+2] < 250)
+			{
+////				outDebug << (int)imgPtr[j] << ", " << (int)imgPtr[j+1] << ", " << (int)imgPtr[j+2] << endl;
+//
+//				//find the correct bin
+  				int rowBin = (int)i/HEIGHT_BIN;
+				int colBin = (int)j/WIDHT_BIN;
+				clusterImg.ptr<ushort>(rowBin)[colBin] += 1;
+			//	imgPtr[col] = 0; imgPtr[col+1] = 0; imgPtr[col+2] = 0;
+			}
+		}
+	}
+	double angle;
+	Point2d meanInit;
+	angle = 0.0;
+	Size axesSize;
+	Mat covMat(2,2, CV_64F);
+	//Non maximum supresion
+	for (int i = 0; i < clusterImg.rows; i++)
+	{
+		ushort* ptr = clusterImg.ptr<ushort>(i);
+		for (int j = 0; j < clusterImg.cols; j++)
+		{
+			//col and row in the original image
+			int col = j*WIDHT_BIN;
+			int row = i*HEIGHT_BIN;
+			int num = (int)ptr[j];
+			if (num > 100 && isBiggestNeigh(num, i, j, &clusterImg))
+			{
+				getCovarianceMatx(i, j, &clusterImg, covMat, meanInit);
+				getEllipseParam(&covMat, angle);
+				//axesSize = Size(img.rows/15, img.cols/45);
+				axesSize = Size(BIG_AXIS, SMALL_AXIS);
+
+				meanInit.x *= WIDHT_BIN;
+				meanInit.y *= HEIGHT_BIN;
+
+				centres[numPeople] = Point(int(meanInit.x)+(WIDHT_BIN/2), int(meanInit.y) + (HEIGHT_BIN/2));
+				angles[numPeople] = angle;
+
+
+//				clusters.push_back(Point(col+(WIDHT_BIN/2),row + (HEIGHT_BIN/2)));
+				numPeople++;
+			}
+			//if (num > 0)
+			//{
+			//	char txt[15];
+			//	itoa(num, txt, 10);
+			//	putText(tmp, txt, Point(col+(WIDHT_BIN/2.5),row + (HEIGHT_BIN/2)),FONT_HERSHEY_PLAIN, 0.8, Scalar::all(0));
+			//	//circle(img, Point(col, row), 3, Scalar::all(0), 3);
+			//}
+			//else
+			//	putText(tmp, "0", Point(col+(WIDHT_BIN/2.5),row + (HEIGHT_BIN/2)),FONT_HERSHEY_PLAIN, 0.8, Scalar::all(0));
+		}
+	}
+
+//	cv::imshow("Original", img);
+	//cv::imshow("Clustering", tmp);
+	cv::waitKey(50);
+	return numPeople;
+
 }
